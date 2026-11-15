@@ -1,5 +1,7 @@
 # SGLang: Fast inference for LLMs and multimodal models
 
+> **DSpark joint-cost-budget branch:** [运行方式、代码改动与完整结果](benchmarks/dspark_budget/README.md)。DeepSeek-V4-Flash-0731 在并发 64/128 下相对 DSpark 吞吐分别提高 6.90%/14.78%；适用范围和验证 token 数见报告。
+
 <p align="center" id="sglangtop">
 <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/assets/logo.png" alt="SGLang" width="400">
 </p>

@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "requests": 512,
+  "concurrency": 128,
+  "wall_s": 36.13473907858133,
+  "output_tokens": 131072,
+  "output_tok_s": 3627.312756153045,
+  "mean_latency_s": 8.533826385344582,
+  "p95_latency_s": 12.200484132394195,
+  "verify_rounds": 35838,
+  "proposed_drafts": 179190,
+  "correct_drafts": 95732,
+  "tokens_per_verify": 3.6573469501646296,
+  "acceptance_rate": 0.5342485629778447,
+  "retractions": 0,
+  "capacity_unconstrained": true
+}

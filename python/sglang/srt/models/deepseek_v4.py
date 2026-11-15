@@ -5226,7 +5226,14 @@ class DeepseekV4ForCausalLM(nn.Module):
             assert self.num_fused_shared_experts == 1
             log_info_on_rank0(logger, "Shared experts fusion optimization enabled.")
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Optional experiment-only cap for host->device weight copies. The
+        # default is unchanged; some hosts contend heavily with 32 copy threads.
+        import os
+
+        load_workers = os.environ.get("DSPARK_EXPERIMENT_LOADER_WORKERS")
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=int(load_workers) if load_workers else None
+        ) as executor:
             futures = []
             weight_names = []
             for name, loaded_weight in weights:

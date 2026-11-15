@@ -1,0 +1,13 @@
+{
+  "url": "http://127.0.0.1:31600",
+  "manifest": "manifest-12.json",
+  "concurrency": 16,
+  "requests": 512,
+  "tokens": 256,
+  "respect_eos": false,
+  "warmup_requests": 128,
+  "warmup_tokens": 256,
+  "manifest_sha256": "6d0c8a084edf5baf38bffa2edcccf0b74de20e7d2ccb1ce0e587654c01ac59d2",
+  "temperature": 0,
+  "ignore_eos": true
+}

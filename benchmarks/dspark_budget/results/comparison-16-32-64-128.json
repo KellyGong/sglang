@@ -1,0 +1,214 @@
+{
+  "16": {
+    "settings": {
+      "manifest_sha256": "6d0c8a084edf5baf38bffa2edcccf0b74de20e7d2ccb1ce0e587654c01ac59d2",
+      "requests": 512,
+      "tokens": 256,
+      "concurrency": 16,
+      "temperature": 0,
+      "ignore_eos": true
+    },
+    "arms": {
+      "native": {
+        "tok_s": [
+          1318.8170605871182,
+          1322.5774952657525,
+          1321.3800070102711
+        ],
+        "median_output_tok_s": 1321.3800070102711,
+        "median_mean_latency_s": 3.04769498917085,
+        "median_p95_latency_s": 3.1233866792172194,
+        "retractions": 0
+      },
+      "dspark": {
+        "tok_s": [
+          1824.6636154485593,
+          1852.6266478709592,
+          1835.0629454176355
+        ],
+        "median_output_tok_s": 1835.0629454176355,
+        "median_mean_latency_s": 2.203342536904529,
+        "median_p95_latency_s": 2.992949878796935,
+        "retractions": 0
+      },
+      "joint": {
+        "tok_s": [
+          1829.8162909920788,
+          1841.2878963536555,
+          1820.0498558553218
+        ],
+        "median_output_tok_s": 1829.8162909920788,
+        "median_mean_latency_s": 2.209505653823726,
+        "median_p95_latency_s": 3.0148041751235723,
+        "retractions": 0
+      }
+    },
+    "joint_ratios": {
+      "native": 1.3847767343870943,
+      "dspark": 0.9971408858542655
+    }
+  },
+  "32": {
+    "settings": {
+      "manifest_sha256": "6d0c8a084edf5baf38bffa2edcccf0b74de20e7d2ccb1ce0e587654c01ac59d2",
+      "requests": 512,
+      "tokens": 256,
+      "concurrency": 32,
+      "temperature": 0,
+      "ignore_eos": true
+    },
+    "arms": {
+      "native": {
+        "tok_s": [
+          1944.8518385746056,
+          1943.926429992707,
+          1950.9937698653328
+        ],
+        "median_output_tok_s": 1944.8518385746056,
+        "median_mean_latency_s": 4.091646738321288,
+        "median_p95_latency_s": 4.180873157456517,
+        "retractions": 0
+      },
+      "dspark": {
+        "tok_s": [
+          2485.014834369353,
+          2521.8862164553666,
+          2542.796181754926
+        ],
+        "median_output_tok_s": 2521.8862164553666,
+        "median_mean_latency_s": 3.1800294362183195,
+        "median_p95_latency_s": 4.345286006107926,
+        "retractions": 0
+      },
+      "joint": {
+        "tok_s": [
+          2541.3626263608503,
+          2531.527019088997,
+          2533.9584536942334
+        ],
+        "median_output_tok_s": 2533.9584536942334,
+        "median_mean_latency_s": 3.1738581960125885,
+        "median_p95_latency_s": 4.301003674045205,
+        "retractions": 0
+      }
+    },
+    "joint_ratios": {
+      "native": 1.3029056524693357,
+      "dspark": 1.0047869872796382
+    }
+  },
+  "64": {
+    "settings": {
+      "manifest_sha256": "6d0c8a084edf5baf38bffa2edcccf0b74de20e7d2ccb1ce0e587654c01ac59d2",
+      "requests": 512,
+      "tokens": 256,
+      "concurrency": 64,
+      "temperature": 0,
+      "ignore_eos": true
+    },
+    "arms": {
+      "native": {
+        "tok_s": [
+          2982.802286978038,
+          2986.2203340005353,
+          2999.946299690159
+        ],
+        "median_output_tok_s": 2986.2203340005353,
+        "median_mean_latency_s": 5.185265273241384,
+        "median_p95_latency_s": 5.252424888312817,
+        "retractions": 0,
+        "source_runs": [
+          "overlap-baselines/vanilla-repeat0",
+          "overlap-baselines/vanilla-repeat1",
+          "overlap-baselines/vanilla-repeat2"
+        ]
+      },
+      "dspark": {
+        "tok_s": [
+          3235.629176099682,
+          3211.4758205923513,
+          3215.494687161025
+        ],
+        "median_output_tok_s": 3215.494687161025,
+        "median_mean_latency_s": 4.914985267230804,
+        "median_p95_latency_s": 6.747376803308725,
+        "retractions": 0,
+        "source_runs": [
+          "overlap-baselines/fixed-repeat0",
+          "overlap-baselines/fixed-repeat1",
+          "overlap-baselines/fixed-repeat2"
+        ]
+      },
+      "joint": {
+        "tok_s": [
+          3446.234877466865,
+          3437.2824270035658,
+          3424.54141146049
+        ],
+        "median_output_tok_s": 3437.2824270035658,
+        "median_mean_latency_s": 4.5888859910774045,
+        "median_p95_latency_s": 6.905045202001929,
+        "retractions": 0,
+        "source_runs": [
+          "overlap-candidate32-r2/repeat0",
+          "overlap-candidate32-r2/repeat1",
+          "overlap-candidate32-r2/repeat2"
+        ]
+      }
+    },
+    "joint_ratios": {
+      "native": 1.1510478272039486,
+      "dspark": 1.0689746870763324
+    },
+    "provenance": "Previous C64 overlap experiments; imported and response-level audited, not rerun."
+  },
+  "128": {
+    "settings": {
+      "manifest_sha256": "6d0c8a084edf5baf38bffa2edcccf0b74de20e7d2ccb1ce0e587654c01ac59d2",
+      "requests": 512,
+      "tokens": 256,
+      "concurrency": 128,
+      "temperature": 0,
+      "ignore_eos": true
+    },
+    "arms": {
+      "native": {
+        "tok_s": [
+          3899.03202749978,
+          3877.499079477937,
+          3894.506894292898
+        ],
+        "median_output_tok_s": 3894.506894292898,
+        "median_mean_latency_s": 7.759141733178694,
+        "median_p95_latency_s": 7.808069622144103,
+        "retractions": 0
+      },
+      "dspark": {
+        "tok_s": [
+          3633.2562383319273,
+          3668.277946309614,
+          3627.312756153045
+        ],
+        "median_output_tok_s": 3633.2562383319273,
+        "median_mean_latency_s": 8.515809070991963,
+        "median_p95_latency_s": 12.16297429986298,
+        "retractions": 0
+      },
+      "joint": {
+        "tok_s": [
+          4170.3434467183815,
+          4165.5433256202095,
+          4202.354443973191
+        ],
+        "median_output_tok_s": 4170.3434467183815,
+        "median_mean_latency_s": 7.312254382090032,
+        "median_p95_latency_s": 11.35480542294681,
+        "retractions": 0
+      }
+    },
+    "joint_ratios": {
+      "native": 1.0708270802729098,
+      "dspark": 1.1478253041225184
+    }
+  }
+}

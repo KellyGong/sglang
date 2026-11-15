@@ -417,6 +417,13 @@ class DSparkWorkerV2(BaseSpecWorker):
 
         self._forced_budget_frac: Optional[float] = None
         self._need_mamba_verify_commit = False
+        from sglang.srt.speculative.dspark_components.dspark_live_cost import (
+            create_live_block_cost,
+        )
+
+        self._live_block_cost = create_live_block_cost(
+            self._verify_planner, self.gamma, server_args
+        )
 
         self._observers = DsparkStepObservers(
             planner=self._verify_planner,
@@ -846,6 +853,16 @@ class DSparkWorkerV2(BaseSpecWorker):
 
         self._observers.begin_step()
 
+        if self._live_block_cost is not None:
+            if self._live_block_cost.overlap:
+                self._live_block_cost.begin(bs)
+            elif batch.seq_lens_cpu is None:
+                raise RuntimeError(
+                    "Live cost calibration requires CPU sequence lengths"
+                )
+            else:
+                self._live_block_cost.begin(bs, int(batch.seq_lens_cpu.float().mean()))
+
         target_model = self.target_worker.model_runner.model
         verify_window = alloc_verify_window(
             batch=batch,
@@ -901,6 +918,8 @@ class DSparkWorkerV2(BaseSpecWorker):
             prefix_lens=prefix_lens,
             req_pool_indices=batch.req_pool_indices,
         )
+        if self._live_block_cost is not None:
+            self._live_block_cost.prepare_layout(verify_token_budget, bs)
 
         layout = self._verify_planner.schedule_layout(
             req_pool_indices=batch.req_pool_indices,
@@ -1082,6 +1101,8 @@ class DSparkWorkerV2(BaseSpecWorker):
             bonus_tokens=accept.bonus,
             new_seq_lens=accept.new_seq_lens,
         )
+        if self._live_block_cost is not None:
+            self._live_block_cost.end(verify_token_budget)
         return GenerationBatchResult(
             logits_output=logits_output,
             next_token_ids=accept.out_tokens.reshape(-1),
@@ -1170,4 +1191,6 @@ class DSparkWorkerV2(BaseSpecWorker):
     def get_confidence_budget_prepare(self):
         if not self._hosts_draft:
             return None
+        if self._live_block_cost is not None and self._live_block_cost.overlap:
+            return self._live_block_cost.prepare_overlap
         return self._verify_planner.confidence_budget_prepare()

@@ -1,0 +1,40 @@
+{
+  "measurements": 27,
+  "requests": 13824,
+  "output_tokens": 3538944,
+  "retractions": 0,
+  "same_source_across_arms": true,
+  "policy_counts_including_warmups": {
+    "16": {
+      "fallback": 10144
+    },
+    "32": {
+      "fallback": 4725,
+      "seed": 29,
+      "priced": 398
+    },
+    "128": {
+      "fallback": 336,
+      "seed": 665,
+      "priced": 1591
+    }
+  },
+  "owned_servers_stopped": true,
+  "port_31600_free": true,
+  "gpu_compute_processes": [],
+  "source": {
+    "commit": "c053fc71d3bdb4334335260fa6f685356890d9eb",
+    "sha256": {
+      "python/sglang/srt/speculative/dspark_components/dspark_candidate.py": "6014e1a54adad104768ce0a21ddd8838af09fb537e7039cbb79527f93bce9b77",
+      "python/sglang/srt/speculative/dspark_components/dspark_candidate_kernels.py": "59aed2d332279cc875dce7e07815c93f5bf37616afd7f8db4f38f883cc267c4d",
+      "python/sglang/srt/speculative/dspark_components/dspark_live_cost.py": "27f2838d5b50e8454c88fb3f8576c9bce2f79d371da0393084f4e29030fe60c0",
+      "python/sglang/srt/speculative/dspark_components/dspark_draft.py": "e407baf6d0c9775e8ef0328499506ca8c8c1540c3492e4920ee7e5f1c31c12f6",
+      "python/sglang/srt/speculative/dspark_components/dspark_draft_sampler.py": "c79ca8cf4484fceb761028355fedc764d1265b8902a03434611db3ef2e77c9b6",
+      "python/sglang/srt/speculative/dspark_components/dspark_worker_v2.py": "da8e6506f857e3f9ff44e035883e5809aabb9d610acc4ac290f5c3890982bccb",
+      "python/sglang/srt/speculative/dspark_components/dspark_planner.py": "c45435aee876c285c547fd152cf729d8aaee9c03e8e8a830682244691542bf36",
+      "python/sglang/srt/speculative/dspark_components/dspark_sps.py": "5bc24190ddc91fad9fd42d723c939b3eb3b32df74d2c3f3e12d247665c424f28",
+      "python/sglang/srt/speculative/dspark_components/dspark_verify.py": "c610653fa0001aa69ff7e2329959778e7af91dda056181d12ffdae8146462d45",
+      "python/sglang/srt/models/deepseek_v4.py": "d3d614829554dc0131a422bfbd04962b26b6076527a51f5c3aca29d4ee1d760a"
+    }
+  }
+}
