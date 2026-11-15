@@ -28,4 +28,3 @@ def read_run(path):
     summary['finish_reason_counts'] = dict(Counter(
         m['finish_reason'].get('type', 'unknown') for m in metas))
     return settings, summary
-

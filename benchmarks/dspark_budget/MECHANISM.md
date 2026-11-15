@@ -121,4 +121,3 @@ run_decode(batch):
 - overlap 模式在 scheduler 的预算准备回调前安装成本曲线，保留原始 confidence relay/carry 延迟。worker 消费已准备的分桶，避免把上一批成本策略错用于下一批。
 - DSV4 GPU-only attention 不一定提供 CPU 长度镜像，此时用已提交请求长度作为粗粒度上下文提示，可能落后少量在途 tokens；不会为成本控制添加 D2H 同步。
 - 缓存身份包含模型、TP、运行时、实现代码、相关配置和调度模式。当前限制 DP1 / PP1；实际验证为 TP8。在线探索有冷启动开销，本次正收益是在请求预热之后测得。
-
