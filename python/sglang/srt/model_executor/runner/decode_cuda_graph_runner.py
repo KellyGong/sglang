@@ -567,7 +567,10 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
             self.model_runner.shared_read_done_event = read_done
 
     def _build_ragged_verify_token_buckets(self) -> list[int]:
-        buckets = sorted({bs * self.captured_req_width for bs in self.capture_bs})
+        buckets = {bs * self.captured_req_width for bs in self.capture_bs}
+        largest = max(buckets)
+        extra = {int(t) for t in envs.SGLANG_RAGGED_VERIFY_EXTRA_TIERS.get()}
+        buckets = sorted(buckets | {t for t in extra if 0 < t < largest})
         assert buckets and buckets[0] > 0, f"{buckets=}"
         return buckets
 
@@ -1231,7 +1234,26 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
                             variant_label,
                             attention_variant,
                         )
+        self._capture_extra_ragged_tiers(stream_idx)
         _set_capture_attention_variant(None)
+
+    def _capture_extra_ragged_tiers(self, stream_idx: Optional[int]) -> None:
+        """Compact-verify tiers that are not a captured batch size's full window."""
+        if not self.ragged_verify_mode:
+            return
+        uniform = {bs * self.captured_req_width for bs in self.capture_bs}
+        for num_tokens in reversed(self.capture_num_tokens):
+            if num_tokens in uniform:
+                continue
+            with torch_compile_decoration.patch_model(
+                self.model_runner.model,
+                False,
+                num_tokens=num_tokens,
+                tp_group=get_parallel().tp_group,
+            ) as forward:
+                self.capture_one_shape(
+                    num_tokens, forward, stream_idx, num_tokens=num_tokens
+                )
 
     def capture_one_shape(
         self,
@@ -1240,8 +1262,10 @@ class DecodeCudaGraphRunner(BaseCudaGraphRunner):
         stream_idx: Optional[int] = None,
         variant_label: Optional[str] = None,
         attention_variant: Optional[str] = None,
+        num_tokens: Optional[int] = None,
     ):
-        num_tokens = size * self.captured_req_width
+        if num_tokens is None:
+            num_tokens = size * self.captured_req_width
         bs = self._ragged_capture_slots(num_tokens) if self.ragged_verify_mode else size
 
         # Sanity-check: --debug-cuda-graph requires breakable backend.

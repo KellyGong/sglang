@@ -530,6 +530,10 @@ class Envs:
     SGLANG_DSPARK_DEBUG_DUMP = EnvTuple(tuple())
     SGLANG_DSPARK_LOG_SPS_PRED_INTERVAL = EnvInt(0)
     SGLANG_DSPARK_STS_COLLECT_PATH = EnvStr("")
+    SGLANG_DSPARK_SHADOW_TREE_PATH = EnvStr("")
+    # Live block cost model: "cells" measures every (batch size, context, budget)
+    # on its own; "fit" shares one fitted step cost across batch sizes.
+    SGLANG_DSPARK_LIVE_COST_MODEL = EnvStr("cells")
     SGLANG_DSPARK_BLOCK_ACCEPT_ESTIMATE_PATH = EnvStr("")
     SGLANG_DSPARK_BLOCK_ACCEPT_ONLINE_INTERVAL = EnvInt(0)
     SGLANG_DSPARK_ENABLE_SPS_RECORD = EnvBool(False)
@@ -1425,6 +1429,8 @@ class Envs:
     SGLANG_LILICORR_REQUIRE_SAMPLING = EnvBool(False)
     SGLANG_RAGGED_VERIFY_MODE = EnvStr("static")
     SGLANG_TEST_RAGGED_VERIFY_FORCE_UNIFORM_CAPTURE = EnvBool(False)
+    # Extra compact-verify graph tiers, in tokens, beside one per captured batch size.
+    SGLANG_RAGGED_VERIFY_EXTRA_TIERS = EnvTuple(tuple())
     # Skip draft_extend while adaptive spec is at steps=0 (drafting disabled).
     # Saves the per-step draft forward, but the draft KV goes stale: an upshift
     # back to steps>0 starts from a cold draft state (low accept until it recovers).

@@ -21,6 +21,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Arbitrary; the cache file is a restart aid, not a per-sync log.
+PERSIST_SECONDS = 10.0
+
 
 @dataclass
 class CostCell:
@@ -48,6 +51,10 @@ class BlockCostHistory:
 
     def context_bin(self, context: int) -> int:
         return max(context, 0) // self.context_step
+
+    @property
+    def has_measurements(self) -> bool:
+        return bool(self.cells)
 
     def record(self, bs: int, context_bin: int, budget: int, seconds: float):
         if bs <= 0 or not 0 <= budget <= bs * self.gamma:
@@ -118,8 +125,97 @@ class BlockCostHistory:
         return True
 
 
+class FittedCostHistory:
+    """Host cost model shared across batch sizes. A (batch size, graph tier)
+    that has run prices itself; a line fitted through those prices the tiers a
+    batch size has not run, so a new batch size needs no sweep of its own."""
+
+    def __init__(self, gamma: int, identity: dict, resolve_tiers, context_step=1024):
+        from sglang.srt.speculative.dspark_components.dspark_step_cost import (
+            StepCostFit,
+        )
+
+        self.gamma = gamma
+        self.identity = identity
+        self.context_step = context_step
+        # The compact verify graph tiers, in tokens; known only after capture.
+        self._resolve_tiers = resolve_tiers
+        self._new_fit = StepCostFit
+        self.fits: dict = {}
+        # (bs, context_bin) -> (fit samples the curve was built at, curve)
+        self._curves: dict = {}
+
+    def context_bin(self, context: int) -> int:
+        return max(context, 0) // self.context_step
+
+    @property
+    def has_measurements(self) -> bool:
+        return any(fit.num_observes for fit in self.fits.values())
+
+    def _tier(self, tokens: int) -> int:
+        tiers = self._resolve_tiers()
+        return tiers[min(bisect.bisect_left(tiers, tokens), len(tiers) - 1)]
+
+    def record(self, bs: int, context_bin: int, budget: int, seconds: float):
+        if bs <= 0 or not 0 <= budget <= bs * self.gamma:
+            raise ValueError("Invalid batch/budget")
+        if not math.isfinite(seconds) or seconds <= 0:
+            return
+        fit = self.fits.setdefault(context_bin, self._new_fit())
+        fit.observe(bs=bs, graph_tokens=self._tier(bs + budget), ms=1000 * seconds)
+
+    def curve(self, bs: int, context_bin: int):
+        fit = self.fits.get(context_bin)
+        if fit is None or not fit.ready:
+            return None
+        cached = self._curves.get((bs, context_bin))
+        if cached is not None and cached[0] == fit.num_observes:
+            return cached[1]
+        budgets = range(bs * self.gamma + 1)
+        prices = [
+            max(fit.predict(bs=bs, graph_tokens=self._tier(bs + b)), 1e-3) / 1000
+            for b in budgets
+        ]
+        curve = [bs + b for b in budgets], [1 / t for t in prices]
+        self._curves[bs, context_bin] = (fit.num_observes, curve)
+        return curve
+
+    def dump(self):
+        return {
+            "version": 3,
+            "identity": self.identity,
+            "gamma": self.gamma,
+            "context_step": self.context_step,
+            "fits": {str(ctx): fit.dump() for ctx, fit in sorted(self.fits.items())},
+            "described": {
+                str(ctx): fit.describe() for ctx, fit in sorted(self.fits.items())
+            },
+        }
+
+    def restore(self, data):
+        if (
+            data.get("version") != 3
+            or data.get("identity") != self.identity
+            or data.get("gamma") != self.gamma
+            or data.get("context_step") != self.context_step
+        ):
+            return False
+        fits = {}
+        for ctx, state in data["fits"].items():
+            fit = self._new_fit()
+            fit.restore(state)
+            fits[int(ctx)] = fit
+        self.fits = fits
+        self._curves = {}
+        return True
+
+
 class LiveBlockCost:
     """GPU timing adapter; rank 0 prices every TP rank's policy."""
+
+    # The TP group's host collective; None when this process is its only rank.
+    group = None
+    _persisted_at = 0.0
 
     def __init__(self, path, gamma, planner, server_args):
         import torch
@@ -189,7 +285,27 @@ class LiveBlockCost:
                 "SGLANG_JIT_CACHE_DIR",
             }
         }
-        self.history = BlockCostHistory(gamma, identity)
+        from sglang.srt.environ import envs
+        from sglang.srt.speculative.dspark_components.dspark_planner import (
+            ragged_capture_num_tokens,
+        )
+
+        cost_model = envs.SGLANG_DSPARK_LIVE_COST_MODEL.get()
+        if cost_model not in ("cells", "fit"):
+            raise ValueError(
+                "SGLANG_DSPARK_LIVE_COST_MODEL must be cells or fit, got "
+                f"{cost_model!r}"
+            )
+        identity["cost_model"] = cost_model
+        self.history = (
+            FittedCostHistory(
+                gamma,
+                identity,
+                lambda: ragged_capture_num_tokens(model_runner=planner.model_runner),
+            )
+            if cost_model == "fit"
+            else BlockCostHistory(gamma, identity)
+        )
         self.gamma, self.planner = gamma, planner
         self.min_batch_size = int(
             os.environ.get("SGLANG_DSPARK_LIVE_COST_MIN_BATCH_SIZE", "0")
@@ -201,7 +317,9 @@ class LiveBlockCost:
         if not self.overlap:
             planner._budget_planner.carry_steps = 0
             planner._budget_planner.lag_steps = 0
-        self.group = parallel.tp_group.cpu_group
+        self.group = (
+            parallel.tp_group.cpu_group if parallel.tp_group.world_size > 1 else None
+        )
         self.rank = torch.distributed.get_rank()
         self.source_rank = parallel.tp_group.ranks[0]
         self.pending = []
@@ -233,12 +351,17 @@ class LiveBlockCost:
         if self.rank == self.source_rank:
             payload[0]["policy_observations"] = dict(self.policy_counts)
             payload[0]["round_period_observations"] = self.round_periods
-        torch.distributed.broadcast_object_list(
-            payload, src=self.source_rank, group=self.group
-        )
+        if self.group is not None:
+            torch.distributed.broadcast_object_list(
+                payload, src=self.source_rank, group=self.group
+            )
         if self.rank != self.source_rank:
             self.history.restore(payload[0])
-        elif self.history.cells:
+        elif (
+            self.history.has_measurements
+            and time.monotonic() - self._persisted_at >= PERSIST_SECONDS
+        ):
+            self._persisted_at = time.monotonic()
             self.path.parent.mkdir(parents=True, exist_ok=True)
             temporary = self.path.with_suffix(".tmp")
             temporary.write_text(json.dumps(payload[0], indent=2))
@@ -313,7 +436,38 @@ class LiveBlockCost:
                     len(req.origin_input_ids) + len(req.output_ids) for req in batch.reqs
                 ) // batch.batch_size()
             self.prepare(batch.batch_size(), context)
+            self.planner.prepare_verify_budget(batch, future_map)
+            self._agree_on_budget(batch)
+            return
         self.planner.prepare_verify_budget(batch, future_map)
+
+    def _agree_on_budget(self, batch):
+        """Every rank verifies in the source rank's graph tier. Each rank takes
+        the budget argmax over its own copy of the confidences; two ranks that
+        land on different sides of a tier boundary replay different verify
+        graphs, and their collectives never meet."""
+        import torch
+
+        from sglang.srt.speculative.dspark_components.dspark_planner import (
+            local_verify_tier_num_tokens,
+        )
+
+        # A fallback batch verifies the whole block on every rank already.
+        if self.group is None or self.policy_phase == "fallback":
+            return
+        draft_input = batch.spec_info
+        budget = draft_input.verify_token_budget
+        # -1: no budget, the planner verifies the whole block.
+        agreed = torch.tensor([-1 if budget is None else int(budget)])
+        torch.distributed.broadcast(agreed, src=self.source_rank, group=self.group)
+        budget = None if int(agreed) < 0 else int(agreed)
+        draft_input.verify_token_budget = budget
+        batch.spec_verify_tier_num_tokens = local_verify_tier_num_tokens(
+            bs=batch.batch_size(),
+            verify_token_budget=budget,
+            verify_num_draft_tokens=self.planner.verify_num_draft_tokens,
+            min_verify_len=self.planner._budget_planner.cfg.min_verify_len,
+        )
 
     def begin(self, bs, context=None):
         import torch

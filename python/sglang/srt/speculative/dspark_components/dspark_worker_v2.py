@@ -67,6 +67,9 @@ from sglang.srt.speculative.dspark_components.dspark_planner import (
     dp_global_verify_tier_num_tokens,
     idle_ragged_layout,
 )
+from sglang.srt.speculative.dspark_components.dspark_shadow_tree import (
+    ShadowTreeStats,
+)
 from sglang.srt.speculative.dspark_components.dspark_verify import (
     CommitInjectCtx,
     DsparkVerifyEpilogue,
@@ -423,6 +426,17 @@ class DSparkWorkerV2(BaseSpecWorker):
 
         self._live_block_cost = create_live_block_cost(
             self._verify_planner, self.gamma, server_args
+        )
+        shadow_tree_path = envs.SGLANG_DSPARK_SHADOW_TREE_PATH.get()
+        self._shadow_tree = (
+            ShadowTreeStats(
+                gamma=self.gamma,
+                markov_head=self.draft_model.markov_head,
+                device=self.device,
+                path=shadow_tree_path,
+            )
+            if shadow_tree_path and get_parallel().tp_rank == 0
+            else None
         )
 
         self._observers = DsparkStepObservers(
@@ -1018,6 +1032,29 @@ class DSparkWorkerV2(BaseSpecWorker):
             draft_tokens=draft_tokens,
             simulate_bonus_sampling_info=simulate_bonus_sampling_info,
         )
+        if (
+            self._shadow_tree is not None
+            and draft_block.corrected_logits is not None
+            and (sampling_info is None or sampling_info.is_all_greedy)
+        ):
+            self._shadow_tree.observe(
+                req_pool_indices=batch.req_pool_indices,
+                req_pool_size=int(
+                    self.model_runner.req_to_token_pool.req_to_token.shape[0]
+                ),
+                prefix_lens=prefix_lens,
+                step_logits=draft_block.corrected_logits,
+                draft_tokens=draft_tokens,
+                correct_len=accept.correct_len,
+                bonus=accept.bonus,
+                num_verified_drafts=(
+                    torch.full_like(accept.correct_len, self.gamma)
+                    if layout is None
+                    else layout.verify_lens[:bs] - 1
+                ),
+                out_tokens=accept.out_tokens,
+                new_seq_lens=accept.new_seq_lens,
+            )
         self.model_runner.ngram_embedding_manager.update_after_verify(
             verify_ids_2d=verify_ids_2d,
             req_pool_indices=batch.req_pool_indices,
