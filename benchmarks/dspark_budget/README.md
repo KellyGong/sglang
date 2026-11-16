@@ -93,3 +93,109 @@ export SGLANG_RAGGED_VERIFY_MODE=compact
 原实验中未启用的候选词表和后续树形实验不在此分支内。历史 36 轮 summary/settings 位于 [results/measurements](results/measurements)，大体积原始响应和模型文件没有上传。重新运行会生成完整响应，以便重新审计。
 
 本次交付校验：15 项 CPU 测试通过；三种启动配置、源码快照生成、模拟响应下的验证长度统计、脚本语法和文档链接检查通过。本次未重新启动 GPU 服务测量性能。
+
+## 拟合成本模型与低负载结论（2026-11-16）
+
+在联合预算之上的三处改动，以及“低负载时加大 draft 预算”的实测结论。和联合预算在计算上的区别，简明版见 [FITTED_COST.md](FITTED_COST.md)。8 × H20-3e、TP8、overlap，每请求 256 token、temperature=0、ignore_eos；每组 3 轮取中位数。
+
+### 新增开关（默认全部关闭）
+
+```bash
+export SGLANG_DSPARK_LIVE_COST_PATH=/persistent/path/live-cost.json
+export SGLANG_DSPARK_LIVE_COST_OVERLAP=1
+export SGLANG_DSPARK_LIVE_COST_MODEL=fit          # 默认 cells，即原来的逐格测量
+export SGLANG_DSPARK_LIVE_COST_MIN_BATCH_SIZE=12  # 拟合模型下可从 32 降到 12
+export SGLANG_RAGGED_VERIFY_MODE=compact
+export SGLANG_RAGGED_VERIFY_EXTRA_TIERS=2,3,...   # 额外的 compact verify 图档位（token 数）
+```
+
+推荐配置是 block size 5、`fit`、最小定价 batch 12。额外档位的上限取 `最大并发 × (gamma + 1)`，每个档位多捕获一张 CUDA graph。
+
+- `fit`：一步的 GPU 时间拟合为 `fixed + per_request * bs + per_token * graph_tokens`。跑过的 (batch, 图档位) 用自己的实测值，没跑过的用拟合线，因此新 batch size 不需要再做一轮 0…5B 的探索。代码在 [dspark_step_cost.py](../../python/sglang/srt/speculative/dspark_components/dspark_step_cost.py) 和 `dspark_live_cost.py::FittedCostHistory`。
+- 额外档位：默认只有 `captured_bs × (gamma + 1)` 这些档位，预算落在两档之间时多出来的 token 白算。本次用 `2..24` 全部、`26..48` 步长 2、`52..96` 步长 4、`104..` 步长 16。
+- rank 间预算一致：每个 TP rank 各自对置信度取 argmax，档位变细后两个 rank 会落在不同图档位，NCCL 互相等待而挂死（并发 64 约 1400 步后复现）。现在由 rank 0 广播预算，对 `cells` 模型同样生效。
+
+### 结果
+
+| 并发 | DSpark tok/s | 联合预算（cells，≥32）| 拟合模型（≥12）| 拟合 / DSpark | 拟合 / 联合预算 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 331.8 | — | 329.6 | -0.7% | — |
+| 2 | 477.8 | — | 479.8 | +0.4% | — |
+| 4 | 689.1 | — | 671.1 | -2.6% | — |
+| 8 | 924.0 | — | 898.3 | -2.8% | — |
+| 16 | 1537.4 | — | 1711.6 | **+11.3%** | — |
+| 32 | 2510.6 | 2531.4 | 2746.1 | **+9.4%** | +8.5% |
+| 64 | 3181.7 | 3409.3 | 3567.9 | **+12.1%** | +4.7% |
+| 128 | 3629.6 | 4141.4 | 4315.3 | **+18.9%** | +4.2% |
+
+并发 1–16 用 `lowload_sweep.py`（一台 max-running=16 的服务，不设 min-free-slots）；并发 32–128 沿用上文协议（max-running=并发、min-free-slots=8、512 请求）。并发 1–8 批量低于 12，走完整验证，差异在两次基线之间的波动范围内（同一配置两台机器的基线相差 ±2%）。并发 16 的 +11.3% 在三个代码快照上各测一次，分别为 1711.6 / 1711.4 / 1710.7。表中并发 64、128 的拟合模型从 batch 0 起定价；设为 12 后重测为 3544.3（另一台机器）和 4323.9。
+
+### 低负载加大 draft 预算：测过，没有收益
+
+一步解码约为 7.3 ms 固定 verify + 每个验证 token 0.14–0.19 ms + 1.0 ms draft。并发 1 时一步 9.3 ms，多验证一个 token 至少要多拿回 0.06 个 token 才不亏。
+
+- 加长：head 按 5 训练，第 6–9 位条件接受率 0.68 / 0.59 / 0.50 / 0.44，但 gamma=9 全验证的每步接受长度只从 3.66 到 3.86（短 block 剩下的易中 token 下一步本来也能拿到）。gamma=7 静态在并发 1 为 -1%（单次测量），gamma=9 加拟合定价在并发 1–8 为 -2%～-5%，在并发 64 只有 +3.4%（gamma=5 为 +12.1%）。
+- 加路径：不实现树形 verify，先统计“首个被拒位置上 target 的 token 在 draft 分布里排第几、换成它之后的 Markov 续写能中几个”。价值最高的兄弟节点为每步 0.063 token，与验证它的成本持平，其余都更低。
+- 链式第二段 draft（同一张宽度 5 的 draft 图以第 5 个 draft 为锚再跑一遍）：接受长度 4.04（单段 gamma=9 为 3.86），但 draft 多 0.7 ms，并发 1 每步 GPU 时间 10.7 ms 对 9.9 ms，净 -3%。
+- 用当前步置信度同步决定验证长度：离线回放约 +8%（回放对短预算偏悲观、对基线也偏低，实际更小），但 draft 之后的主机同步让 verify 的启动准备不再被 draft 遮住，GPU 每步空转 1.75 ms，并发 1 每步 11.7 ms 对 9.9 ms。
+- overlap 管线里两步之前的置信度对 1–8 个请求的批量基本是噪声，这是低于 12 不定价的原因。
+
+链式第二段 draft 和同步门控的实验代码，以及本节的逐轮 summary，没有随分支提交。
+
+### 运行
+
+本节代码在分支 `dspark-fitted-cost`；环境准备同上，clone 时把分支名换成 `dspark-fitted-cost`。以下命令在仓库根目录执行。每个 `--variant` 是 `<名字>=<server.py 参数>`，独占 8 张 GPU 启动一台服务，测完后停止；输出目录必须尚不存在。
+
+并发 1–16（一台 max-running=16 的服务依次测各并发）：
+
+```bash
+source benchmarks/dspark_budget/env.sh
+TIERS=$(python3 -c "print(','.join(map(str, list(range(2,25))+list(range(26,49,2))+list(range(52,97,4)))))")
+"$DSPARK_PY" benchmarks/dspark_budget/lowload_sweep.py --output benchmarks/dspark_budget/runs/fit --repeats 3 \
+  --variant "base5=--block-size 5 --overlap" \
+  --variant "fit5m12=--block-size 5 --overlap --live-cost --live-min-batch 12 --env SGLANG_DSPARK_LIVE_COST_MODEL=fit --env SGLANG_RAGGED_VERIFY_EXTRA_TIERS=$TIERS"
+"$DSPARK_PY" benchmarks/dspark_budget/lowload_report.py benchmarks/dspark_budget/runs/fit --baseline base5
+```
+
+并发 32–128（沿用上文协议：max-running=并发、min-free-slots=8、512 请求；额外档位补到 `并发 × 6`）：
+
+```bash
+for C in 32 64 128; do
+  HIGH=$(python3 -c "print(','.join(map(str, range(104, $C * 6 + 1, 16))))")
+  "$DSPARK_PY" benchmarks/dspark_budget/lowload_sweep.py --output benchmarks/dspark_budget/runs/fit-c$C \
+    --max-running $C --concurrency $C --requests-per-concurrency 1 --min-requests 512 \
+    --first-warmup-multiplier 8 --repeats 3 \
+    --variant "dspark5=--block-size 5 --overlap --min-free-slots 8" \
+    --variant "joint5=--block-size 5 --overlap --min-free-slots 8 --live-cost --live-min-batch 32" \
+    --variant "fit5m12=--block-size 5 --overlap --min-free-slots 8 --live-cost --live-min-batch 12 --env SGLANG_DSPARK_LIVE_COST_MODEL=fit --env SGLANG_RAGGED_VERIFY_EXTRA_TIERS=$TIERS,$HIGH"
+  "$DSPARK_PY" benchmarks/dspark_budget/lowload_report.py benchmarks/dspark_budget/runs/fit-c$C --baseline dspark5
+done
+```
+
+每个 variant 目录下有 `server.log`、`command.json`、`environment.json` 和各轮的 `c<并发>-r<轮次>/summary.json`。拟合出的系数在该目录 `live-cost-final.json` 的 `described` 字段（`fixed / per_request / per_token`，单位 ms），换硬件时先看这三个数。
+
+分析脚本读 `measure.py` 在每轮目录里保存的 `server-info.json`，需要用 `--env` 打开对应的 debug dump：
+
+| 脚本 | variant 参数 | 输出 |
+|---|---|---|
+| `cost_report.py` | `--env SGLANG_DSPARK_DEBUG_DUMP=core,step_cpu_time,step_gpu_time,draft_gpu_time,target_verify_gpu_time` | 一步解码的成本分解 |
+| `calibration_report.py` | `--block-size 9 --overlap --env SGLANG_DSPARK_DEBUG_DUMP=all`（全验证） | 各 draft 位置的置信度与实际接受率 |
+| `policy_sim.py` | 同上 | 不同验证策略的离线回放 |
+| `shadow_tree_report.py` | `--shadow-tree`，读 variant 目录下的 `shadow-tree.json` | 兄弟 draft 路径的期望收益 |
+
+```bash
+"$DSPARK_PY" benchmarks/dspark_budget/lowload_sweep.py --output benchmarks/dspark_budget/runs/trace --concurrency 1 \
+  --variant "t9=--block-size 9 --overlap --env SGLANG_DSPARK_DEBUG_DUMP=all"
+"$DSPARK_PY" benchmarks/dspark_budget/calibration_report.py benchmarks/dspark_budget/runs/trace/t9/c1-r0/server-info.json
+```
+
+CPU 测试：
+
+```bash
+"$DSPARK_PY" -m pytest -q \
+  test/registered/spec/dspark/test_dspark_live_cost.py \
+  test/registered/spec/dspark/test_dspark_cost_integration.py \
+  test/registered/spec/dspark/test_dspark_step_cost.py
+```
+
+本次没有跑准确率评测。temperature=0 下基线自身两次运行的输出也只有前 20–35 个 token 相同，无法用逐字比对检查。

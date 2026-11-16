@@ -27,6 +27,9 @@ def main():
     p.add_argument("--overlap", action="store_true")
     p.add_argument("--no-spec", action="store_true")
     p.add_argument("--greedy-draft", action="store_true")
+    p.add_argument("--shadow-tree", action="store_true")
+    p.add_argument("--env", action="append", default=[], metavar="NAME=VALUE")
+    p.add_argument("--server-arg", action="append", default=[], metavar="FLAG[=VALUE]")
     args = p.parse_args()
     root = Path(os.environ["DSPARK_EXPERIMENT_ROOT"]) / args.label
     root.mkdir(parents=True, exist_ok=True)
@@ -121,6 +124,8 @@ def main():
             "--speculative-dspark-block-size",
             str(args.block_size),
         ]
+    for item in args.server_arg:
+        cmd += item.split("=", 1)
     env = os.environ.copy()
     env["SGLANG_RAGGED_VERIFY_MODE"] = "compact"
     env.pop("SGLANG_DSPARK_DEBUG_DUMP", None)
@@ -129,6 +134,12 @@ def main():
     env["SGLANG_DSPARK_USE_GREEDY_DRAFT"] = (
         "1" if args.greedy_draft else "0"
     )
+    env.pop("SGLANG_DSPARK_SHADOW_TREE_PATH", None)
+    if args.shadow_tree:
+        env["SGLANG_DSPARK_SHADOW_TREE_PATH"] = str(root / "shadow-tree.json")
+    for item in args.env:
+        name, _, value = item.partition("=")
+        env[name] = value
     if args.live_cost:
         env["SGLANG_DSPARK_LIVE_COST_OVERLAP"] = "1" if args.overlap else "0"
         env["SGLANG_DSPARK_LIVE_COST_MIN_BATCH_SIZE"] = str(args.live_min_batch)
